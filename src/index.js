@@ -1,12 +1,26 @@
-import React from 'react';
-import ReactDOM from 'react-dom';
-import './index.css';
-import App from './App';
-import * as serviceWorker from './serviceWorker';
+import React from "react";
+import ReactDOM from "react-dom";
+import Listener from "./listener";
+import Rubber from "./rubber";
+import Clock from "./clock";
+import Rect from "./rect";
+import Shadow from "./shadow";
+import Nonzero from "./paperCut";
+import GridAxis from "./GridAxis";
+import RubberLine from "./RubberLine";
 
-ReactDOM.render(<App />, document.getElementById('root'));
+const App = () => {
+	return (
+		<div>
+			{/* <Rubber/> */}
+			{/* <Clock/> */}
+			{/* <Rect/> */}
+			{/* <Shadow /> */}
+			{/* <Nonzero /> */}
+			{/* <GridAxis/> */}
+			<RubberLine />
+		</div>
+	);
+};
 
-// If you want your app to work offline and load faster, you can change
-// unregister() to register() below. Note this comes with some pitfalls.
-// Learn more about service workers: https://bit.ly/CRA-PWA
-serviceWorker.unregister();
+ReactDOM.render(<App />, document.querySelector("#root"));
