@@ -1,6 +1,13 @@
 import React, { Component } from "react";
 import $ from "jquery";
-import { Menu, Select, Checkbox, Segment, Button } from "semantic-ui-react";
+import {
+	Menu,
+	Select,
+	Checkbox,
+	Segment,
+	Button,
+	Popup
+} from "semantic-ui-react";
 import _ from "lodash";
 
 const WIDTH = 800;
@@ -12,6 +19,11 @@ const options = [
 	{ key: "blue", value: "blue", text: "Blue" },
 	{ key: "orange", value: "orange", text: "Orange" },
 	{ key: "purple", value: "purple", text: "Purple" }
+];
+
+const shapes = [
+	{ key: "rect", value: "rectangle", text: "Rectangle" },
+	{ key: "arc", value: "circle", text: "Circle" }
 ];
 
 const HORIZONTAL_TICK_WIDTH = 10;
@@ -40,40 +52,62 @@ class RubberLine extends Component {
 		this.dragging = false;
 
 		this.color = options[0].value;
+		this.shape = shapes[0].value;
 		this.guide = false;
+		this.onLeave = false;
+		this.histImgs = [];
+		this.recoverImgs = [];
+		this.state = {
+			disableUndo: this.histImgs.length === 0,
+			disableRedo: this.recoverImgs.length === 0
+		};
 	}
 
 	componentDidMount() {
 		this.canvas = $("#cvs")[0];
 		this.context = this.canvas.getContext("2d");
 		this.context.lineWidth = 2;
+		// line head style
+		this.context.lineCap = "round";
+		// joint of lines style
+		this.context.lineJoin = "round";
 		this.context.save();
 		this.createGrid();
+		this.histImgs.push(this.context.getImageData(0, 0, WIDTH, HEIGHT));
+	}
+
+	shouldComponentUpdate(nextProp, nextState) {
+		if (
+			this.state.disableUndo === nextState.disableUndo &&
+			this.state.disableRedo === nextState.disableRedo
+		) {
+			return false;
+		}
+		return true;
 	}
 
 	createGrid = () => {
-		if (!this.context) {
-			this.context = $("#cvs")[0].getContext("2d");
-		}
-		this.context.lineWidth = GRID_LINE_WIDTH;
+		const context = $("#cvs")[0].getContext("2d");
+
+		context.lineWidth = GRID_LINE_WIDTH;
 		// CREATE HORIZONTAL
 		for (let x = 1; x < HORIZONTAL_TICK_NUMBER; x++) {
-			this.context.beginPath();
-			this.context.moveTo(x * HORIZONTAL_TICK_WIDTH, 0);
-			this.context.lineTo(x * HORIZONTAL_TICK_WIDTH, HEIGHT);
-			this.context.stroke();
+			context.beginPath();
+			context.moveTo(x * HORIZONTAL_TICK_WIDTH, 0);
+			context.lineTo(x * HORIZONTAL_TICK_WIDTH, HEIGHT);
+			context.stroke();
 		}
 
 		// CREATE VERTICAL
 		for (let y = 1; y < VERTICAL_TICK_NUMBER; y++) {
-			this.context.beginPath();
-			this.context.moveTo(0, y * VERTICAL_TICK_HEIGHT);
-			this.context.lineTo(WIDTH, y * VERTICAL_TICK_HEIGHT);
-			this.context.stroke();
+			context.beginPath();
+			context.moveTo(0, y * VERTICAL_TICK_HEIGHT);
+			context.lineTo(WIDTH, y * VERTICAL_TICK_HEIGHT);
+			context.stroke();
 		}
-		this.context.strokeStyle = "gray";
-		this.context.closePath();
-		this.context.restore();
+		context.strokeStyle = "gray";
+		context.closePath();
+		context.restore();
 	};
 
 	// return the currect coordinates relative to canvas
@@ -87,25 +121,16 @@ class RubberLine extends Component {
 
 	// save and restore drawing surface
 	saveDrawingSurface() {
-		if (!this.context) {
-			this.context = $("#cvs")[0].getContext("2d");
-		}
-		this.drawingSurfaceImageData = this.context.getImageData(
-			0,
-			0,
-			WIDTH,
-			HEIGHT
-		);
+		const context = $("#cvs")[0].getContext("2d");
+		this.drawingSurfaceImageData = context.getImageData(0, 0, WIDTH, HEIGHT);
 	}
 
 	// apply the saved image
 	restoreDrawingSurface = () => {
-		if (!this.context) {
-			this.context = $("#cvs")[0].getContext("2d");
-		}
+		const context = $("#cvs")[0].getContext("2d");
 		// everytime replace the old place with the new one
 		if (this.drawingSurfaceImageData)
-			this.context.putImageData(this.drawingSurfaceImageData, 0, 0);
+			context.putImageData(this.drawingSurfaceImageData, 0, 0);
 	};
 
 	// OPERATE RUBBERBANDS:
@@ -123,13 +148,11 @@ class RubberLine extends Component {
 
 	// dynamically stroke rubberband line
 	strokeRubberbandLine = (loc) => {
-		if (!this.context) {
-			this.context = $("#cvs")[0].getContext("2d");
-		}
-		this.context.beginPath();
+		const context = $("#cvs")[0].getContext("2d");
+		context.beginPath();
 
 		this.createDashLine(
-			this.context,
+			context,
 			this.mousedown.x,
 			loc.x,
 			this.mousedown.y,
@@ -146,17 +169,6 @@ class RubberLine extends Component {
 		);
 		context.moveTo(x1, y1);
 		for (let i = 0; i < dashNum; i++) {
-			/* if (i % 2 === 0) {
-				context.lineTo(
-					x1 + (deltaX / dashNum) * i,
-					y1 + (deltaY / dashNum) * i
-				);
-			} else {
-				context.moveTo(
-					x1 + (deltaX / dashNum) * i,
-					y1 + (deltaY / dashNum) * i
-				);
-			} */
 			context[i % 2 === 0 ? "lineTo" : "moveTo"](
 				x1 + (deltaX / dashNum) * i,
 				y1 + (deltaY / dashNum) * i
@@ -170,66 +182,88 @@ class RubberLine extends Component {
 		this.saveDrawingSurface();
 		this.updateRubberbandRect(loc);
 
-		if (this.guide) {
+		if (this.guide && this.onLeave === false) {
 			this.strokeRubberbandLine(loc);
 		}
-
-		this.createGuidewire(loc);
+		if (this.shape === "rectangle") {
+			this.createRect(loc);
+		} else if (this.shape === "circle") {
+			this.createArc(loc);
+		}
 	};
 
 	// stroke rect based on rubberband rectangle size and coordinates
-	createGuidewire = (loc) => {
-		if (!this.context) {
-			this.context = $("#cvs")[0].getContext("2d");
-		}
+	createRect = (loc) => {
+		const context = $("#cvs")[0].getContext("2d");
 
-		this.context.strokeStyle = this.color;
-		this.context.beginPath();
-		this.context.moveTo(
+		context.strokeStyle = this.color;
+		context.beginPath();
+		context.moveTo(
 			this.RubberbandRect.left,
 			this.RubberbandRect.top + Math.abs(loc.y - this.mousedown.y)
 		);
-		this.context.lineTo(
+		context.lineTo(
 			this.RubberbandRect.left + this.RubberbandRect.width,
 			this.RubberbandRect.top + Math.abs(loc.y - this.mousedown.y)
 		);
-		this.context.moveTo(
+		context.moveTo(
 			this.RubberbandRect.left + this.RubberbandRect.width,
 			this.RubberbandRect.top + Math.abs(loc.y - this.mousedown.y)
 		);
-		this.context.lineTo(
-			this.RubberbandRect.left + this.RubberbandRect.width,
-			this.RubberbandRect.top -
-				this.RubberbandRect.height +
-				Math.abs(loc.y - this.mousedown.y)
-		);
-		this.context.moveTo(
+		context.lineTo(
 			this.RubberbandRect.left + this.RubberbandRect.width,
 			this.RubberbandRect.top -
 				this.RubberbandRect.height +
 				Math.abs(loc.y - this.mousedown.y)
 		);
-		this.context.lineTo(
+		context.moveTo(
+			this.RubberbandRect.left + this.RubberbandRect.width,
+			this.RubberbandRect.top -
+				this.RubberbandRect.height +
+				Math.abs(loc.y - this.mousedown.y)
+		);
+		context.lineTo(
 			this.RubberbandRect.left,
 			this.RubberbandRect.top -
 				this.RubberbandRect.height +
 				Math.abs(loc.y - this.mousedown.y)
 		);
-		this.context.moveTo(
+		context.moveTo(
 			this.RubberbandRect.left,
 			this.RubberbandRect.top -
 				this.RubberbandRect.height +
 				Math.abs(loc.y - this.mousedown.y)
 		);
-		this.context.lineTo(
+		context.lineTo(
 			this.RubberbandRect.left,
 			this.RubberbandRect.top + Math.abs(loc.y - this.mousedown.y)
 		);
-		this.context.stroke();
+		context.stroke();
+	};
+
+	createArc = (loc) => {
+		const context = $("#cvs")[0].getContext("2d");
+
+		context.strokeStyle = this.color;
+		context.beginPath();
+
+		const radius =
+			Math.floor(
+				Math.sqrt(
+					Math.pow(Math.abs(loc.x - this.mousedown.x), 2) +
+						Math.pow(Math.abs(loc.y - this.mousedown.y), 2)
+				)
+			) / 2;
+
+		const x = loc.x - (loc.x - this.mousedown.x) / 2;
+		const y = loc.y - (loc.y - this.mousedown.y) / 2;
+		context.arc(x, y, radius, 0, 2 * Math.PI, false);
+		context.stroke();
 	};
 
 	// Event listener and action perform
 	onCanvasClick = (e) => {
+		this.onLeave = false;
 		e.preventDefault();
 		const loc = this.mapWindowToCanvas(e.clientX, e.clientY);
 		this.dragging = true;
@@ -246,19 +280,17 @@ class RubberLine extends Component {
 
 	onCanvasMouseLeave = (e) => {
 		if (this.dragging) {
+			this.onLeave = true;
 			e.preventDefault();
-			e.persist();
 			const loc = this.mapWindowToCanvas(e.clientX, e.clientY);
-			// update the picture in the last frame and repaint the previous shapes
-			this.restoreDrawingSurface();
-			// update rect shape
-			this.updateRubberbandRect(loc);
-			// stroke rect shape
-			this.createGuidewire(loc);
-			// every time save the previous shapes
+			this.updateRubberbandTogether(loc);
 			this.saveDrawingSurface();
+			this.restoreDrawingSurface();
 			this.dragging = false;
+			this.histImgs.push(this.drawingSurfaceImageData);
 		}
+
+		this.setState({ disableUndo: false });
 	};
 
 	onColorChange = (e, { value }) => {
@@ -266,24 +298,62 @@ class RubberLine extends Component {
 		this.color = value;
 	};
 
+	onShapeChange = (e, { value }) => {
+		e.preventDefault();
+		this.shape = value;
+	};
+
 	onToggleGuild = (e) => {
 		e.preventDefault();
 		this.guide = !this.guide;
 	};
 
+	undo = () => {
+		const context = $("#cvs")[0].getContext("2d");
+
+		if (this.histImgs.length > 1) {
+			this.recoverImgs.push(this.histImgs.pop());
+			context.putImageData(this.histImgs[this.histImgs.length - 1], 0, 0);
+			this.drawingSurfaceImageData = this.histImgs[this.histImgs.length - 1];
+			this.setState({ disableRedo: false });
+			if (this.histImgs.length === 1) {
+				this.setState({ disableUndo: true });
+			}
+		}
+	};
+
+	redo = () => {
+		const context = $("#cvs")[0].getContext("2d");
+		if (this.recoverImgs.length) {
+			context.putImageData(this.recoverImgs[this.recoverImgs.length - 1], 0, 0);
+			this.drawingSurfaceImageData = this.recoverImgs[
+				this.recoverImgs.length - 1
+			];
+			this.histImgs.push(this.recoverImgs.pop());
+			if (!this.recoverImgs.length) {
+				this.setState({ disableRedo: true });
+			}
+		}
+	};
+
 	clear = () => {
-		if (!this.context) {
-			this.context = $("#cvs")[0].getContext("2d");
+		const context = $("#cvs")[0].getContext("2d");
+		context.closePath();
+		context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+		context.lineWidth = 2;
+		
+		context.putImageData(this.histImgs[0], 0, 0);
+		this.histImgs.push(context.getImageData(0, 0, WIDTH, HEIGHT));
+
+		this.drawingSurfaceImageData = this.histImgs[0];
+
+		if (this.histImgs.length > 1 && this.onLeave) {
+			this.setState({ disableUndo: false });
 		}
 
-		this.context.restore();
-		this.context.closePath();
-		this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
-		this.createGrid();
-		this.createGrid();
-		this.saveDrawingSurface();
-		this.restoreDrawingSurface();
-		this.context.lineWidth = 2;
+		if (this.recoverImgs.length) {
+			this.setState({ disableRedo: false });
+		}
 	};
 
 	render() {
@@ -312,24 +382,61 @@ class RubberLine extends Component {
 						/>
 					</Menu.Item>
 					<Menu.Item>
+						<Select
+							placeholder='Shape type'
+							options={shapes}
+							onChange={this.onShapeChange}
+						/>
+					</Menu.Item>
+					<Menu.Item>
 						<Segment compact>
-							<Checkbox
-								toggle
-								label='Guidewires'
-								onClick={this.onToggleGuild}
+							<Popup
+								trigger={<Checkbox toggle onClick={this.onToggleGuild} />}
+								content={`Guidewire`}
+								style={{ opacity: 0.7 }}
 							/>
 						</Segment>
 					</Menu.Item>
 					<Menu.Item>
-						<Button
-							negative
-							onClick={(e) => {
-								e.preventDefault();
-								this.clear();
-								this.clear();
-							}}>
-							Erase All
-						</Button>
+						<Popup
+							trigger={
+								<Button
+									icon='redo'
+									onClick={this.redo}
+									disabled={this.state.disableRedo}
+								/>
+							}
+							content='Redo'
+							style={{ opacity: 0.7 }}
+						/>
+					</Menu.Item>
+					<Menu.Item>
+						<Popup
+							trigger={
+								<Button
+									icon='undo'
+									onClick={this.undo}
+									disabled={this.state.disableUndo}
+								/>
+							}
+							content='Undo'
+							style={{ opacity: 0.7 }}
+						/>
+					</Menu.Item>
+					<Menu.Item>
+						<Popup
+							trigger={
+								<Button
+									icon='eraser'
+									negative
+									onClick={(e) => {
+										e.preventDefault();
+										this.clear();
+									}}></Button>
+							}
+							content='Clear all'
+							style={{ opacity: 0.7 }}
+						/>
 					</Menu.Item>
 				</Menu>
 				<canvas
